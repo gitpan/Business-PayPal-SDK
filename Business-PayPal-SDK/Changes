@@ -1,0 +1,15 @@
+Revision history for Perl extension Business::PayPal::SDK.
+
+0.1  Thu Nov 10 11:14:40 2005
+	- Created
+
+0.11 Mon Nov 14
+  - Fixed version to be 3 digits.
+  - Added DoDirectPayment.
+  - Changed the response from functions when there is an error.
+  - Added test script, its just a compile test as anything beyond that would require knowing where the paypal_java_sdk is.
+
+0.12 Mon Nov 15
+  - Added some 'eval's around some java calls to catch errors.
+  - Fix bad package after package main on all 'study's
+  - Fix bug in getErrors

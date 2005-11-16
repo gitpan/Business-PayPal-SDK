@@ -1,6 +1,6 @@
 package Business::PayPal::SDK;
 
-#$Id: SDK.pm,v 1.2 2005/11/16 02:25:42 jacob Exp $
+#$Id: SDK.pm,v 1.3 2005/11/16 02:31:42 jacob Exp $
 
 use strict;
 use warnings;
@@ -19,7 +19,7 @@ use Data::Dumper;
 __PACKAGE__->mk_accessors (@ACCESSORS, "paypal");
 
 our $ERROR = '';
-our $VERSION = '0.11';
+our $VERSION = '0.12';
 our $PPCONINFO = undef;
 
 sub new {
