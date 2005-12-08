@@ -1,12 +1,51 @@
 package Business::PayPal::SDK;
 
-#$Id: SDK.pm,v 1.2 2005/11/16 02:25:42 jacob Exp $
+#$Id: SDK.pm,v 1.6 2005/12/08 01:01:05 jacob Exp $
+#
+=head1 NAME
+
+Business::PayPal::SDK - An interface to paypals SDK's.
+
+=head1 SYNOPSIS
+
+  use Business::PayPal::SDK;
+  my $pp = new Business::PayPal::SDK(
+    {
+      paypal_apiid => "sdk-seller_api1.sdk.com",
+      paypal_apipw => "12345678",
+      paypal_cert => "paypal_java_sdk/samples/Cert/sdk-seller.p12",
+      paypal_certpw => "password",
+      paypal_env => "sandbox",
+      java_sdk_dir => "/path/to/paypals/java/sdk",
+    }
+  );
+
+  my $res = $pp->SetExpressCheckout(
+    {
+      OrderTotal => '10.00',
+      ReturnURL => 'http:://mydomain.com/myreturn',
+      CancelURL => 'http:://mydomain.com/mycancel',
+    }
+  );
+
+  print $res->{token};
+
+=head1 DESCRIPTION
+
+Business::PayPal::SDK is a perl interface to the SDK provided by paypal (http://www.paypal.com/sdk). You can use this module to implement paypal pro and paypal express transactions in perl. On the back end this modules uses Inline::Java to interface directly with the paypals java sdk. Consequently you will need to get a J2SDK and Inline::Java installed.  This was done for 2 reasons. 1) Speed of development, didnt have to deal with all the SOAP stuff. 2) Easier maintanance regarding future changes. That is to say, I only have to make sure I keep this compatiable with paypals SDK, not thier underlying protocol changes.
+
+This document assumes you have an understanding of the java SDK and API provided by PayPal.
+
+All methods take a single hashref as an argument.
+All methods return a hashref, or undef if there is an internal failure of some sort. Check $ret->{ack} to see if the call to PayPal was successful. If $ret->{ack} is not 'Success' than you can check the $res->{ErrorCodes}, this will be an hashref with the key being the error code from paypal and the value is the 'getLongMessage' from the error. Check $obj->error for description of failure.
+
+=cut
 
 use strict;
 use warnings;
 
 use base qw/Class::Accessor/;
-my @ACCESSORS = qw/
+my @REQUIRED = qw/
   paypal_apiid
   paypal_apipw
   paypal_cert
@@ -14,13 +53,29 @@ my @ACCESSORS = qw/
   paypal_env
   java_sdk_dir
 /;
+my @OTHER = qw/
+  jni
+  shared_jvm
+  paypal
+/;
 use Data::Dumper;
 
-__PACKAGE__->mk_accessors (@ACCESSORS, "paypal");
+__PACKAGE__->mk_accessors (@REQUIRED, @OTHER);
 
 our $ERROR = '';
-our $VERSION = '0.11';
+our $VERSION = '0.13';
 our $PPCONINFO = undef;
+
+=head1 Public Methods
+
+=head2 new()
+
+All args are pass in as a hash ref.
+All the other functions require paypal_apiid, paypal_apipw, payapl_cert, paypal_certpw, paypal_env and java_sdk_dir to be defined.  You can pass them all in the new call, or you can use there accessors. $obj->paypal_apiid.
+
+Additionally, you can use pass jni => 1, or shared_jvm => 1 to have these values passed to Inline::Java. See Inline::Javas docs for more details on JNI and SHARED_JVM.
+
+=cut
 
 sub new {
   my $pkg = shift;
@@ -31,7 +86,7 @@ sub new {
 
   my $s = SUPER::new $pkg $self;
 
-  foreach my $ac (@ACCESSORS) {
+  foreach my $ac (@REQUIRED, @OTHER) {
     $s->$ac($args->{$ac}) if ($args->{$ac});
   }
 
@@ -42,15 +97,26 @@ sub new {
   return $s;
 }
 
+=head2 init_java()
+
+This will 'require' Inline::Java and get the jvm fired up.
+
+Does not take any arguments. However, if you want to use the authentication information and cert that is used in the paypal API docs you can set the $Business::PayPal::SDK::PPCONINFO variable to true and it will use those instead of whatever you may have set.
+
+=cut
 sub init_java {
   my $s = shift;
 
   my @study = qw(
     java.util.HashMap
-    com.paypal.sdk.exceptions.PayPalException
     com.paypal.sdk.profiles.APIProfile
     com.paypal.sdk.profiles.ProfileFactory
     com.paypal.sdk.services.CallerServices
+    com.paypal.sdk.exceptions.PayPalException
+    com.paypal.soap.api.AckCodeType
+    com.paypal.soap.api.ErrorType
+    org.apache.axis.types.Token
+    com.paypal.soap.api.CurrencyCodeType
   );
 
   $ENV{CLASSPATH} = $s->get_classpath;
@@ -62,13 +128,14 @@ sub init_java {
     Java => 'STUDY',
     STUDY => [],
     CLASSPATH => $ENV{CLASSPATH},
-    JNI => 1,
+    JNI => $s->jni,
+    SHARED_JVM => $s->shared_jvm,
     DIRECTORY => "/tmp",
   );
   Inline::Java::study_classes(\@study);
   package Business::PayPal::SDK;
 
-  foreach my $ac (@ACCESSORS) {
+  foreach my $ac (@REQUIRED) {
     if (!$s->$ac and !$PPCONINFO) {
       $s->error("$ac not set.");
     }
@@ -110,6 +177,11 @@ sub init_java {
   return 1;
 }
 
+=head2 DoDirectPayment()
+
+DoDirectPayment charges a card. Returns a hasref very similar in structure to the object returned by the java jdk
+
+=cut
 sub DoDirectPayment {
   my $s = shift;
   my $args = shift;
@@ -131,7 +203,6 @@ sub DoDirectPayment {
       ExpYear
       Street1
       CityName
-      StateOrProvince
       IPAddress
     /
   ];
@@ -147,13 +218,9 @@ sub DoDirectPayment {
         com.paypal.soap.api.DoDirectPaymentResponseType
         com.paypal.soap.api.PaymentActionCodeType
         com.paypal.soap.api.PaymentDetailsType
-        com.paypal.soap.api.ErrorType
         com.paypal.soap.api.PaymentCodeType
-        com.paypal.soap.api.CurrencyCodeType
         com.paypal.soap.api.BasicAmountType
         com.paypal.soap.api.PayerInfoType
-        org.apache.axis.types.Token
-        com.paypal.soap.api.AckCodeType
       )
     ]
   );
@@ -194,7 +261,11 @@ sub DoDirectPayment {
   my $ret = {};
   if ($@) {
     if (Inline::Java::caught('java.lang.Exception')) {
-      $s->error("DoDirectPayment failed: [" . $@->getMessage() . '] [' . $@->toString() . ']');
+      if (ref $@) {
+        $s->error("DoDirectPayment failed: [" . $@->getMessage() . '] [' . $@ . ']');
+      } else {
+        $s->error("DoDirectPayment failed: [" . $@ . ']');
+      }
       return undef;
     } else {
       $s->error($@);
@@ -212,6 +283,7 @@ sub DoDirectPayment {
     $ret->{TransactionID} = $resp->getTransactionID;
     $ret->{AVSCode} = $resp->getAVSCode;
     $ret->{CVV2Code} = $resp->getCVV2Code;
+    $ret->{ErrorCodes} = $s->_getErrorHash($resp->getErrors);
   } else {
     $ret->{ErrorCodes} = $s->_getErrorHash($resp->getErrors);
   }
@@ -275,6 +347,9 @@ sub _getPersonName {
     /
   ];
 
+  return undef unless ($s->_checkRequires($reqs, $args));
+
+
   package main;
   require Inline::Java;
   Inline::Java::study_classes(
@@ -337,6 +412,11 @@ sub _getCardType {
   }
 }
 
+=head2 DoExpressCheckoutPayment()
+
+DoExpressCheckoutPayment after getting a token
+
+=cut
 sub DoExpressCheckoutPayment {
   my $s = shift;
   my $args = shift;
@@ -356,18 +436,17 @@ sub DoExpressCheckoutPayment {
     /
   ];
 
+  return undef unless ($s->_checkRequires($reqs, $args));
+
   package main;
   Inline::Java::study_classes(
     [
       qw(
-        com.paypal.soap.api.AckCodeType
         com.paypal.soap.api.BasicAmountType
-        com.paypal.soap.api.CurrencyCodeType
         com.paypal.soap.api.DoExpressCheckoutPaymentRequestDetailsType
         com.paypal.soap.api.DoExpressCheckoutPaymentRequestType
         com.paypal.soap.api.DoExpressCheckoutPaymentResponseDetailsType
         com.paypal.soap.api.DoExpressCheckoutPaymentResponseType
-        com.paypal.soap.api.ErrorType
         com.paypal.soap.api.PaymentActionCodeType
         com.paypal.soap.api.PaymentCodeType
         com.paypal.soap.api.PaymentDetailsType
@@ -375,33 +454,50 @@ sub DoExpressCheckoutPayment {
         com.paypal.soap.api.PaymentStatusCodeType
         com.paypal.soap.api.PaymentTransactionCodeType
         java.util.Calendar
-        org.apache.axis.types.Token
       )
     ]
   );
   package Business::PayPal::SDK;
 
-  my $request = com::paypal::soap::api::DoExpressCheckoutPaymentRequestType->new();
-  my $requestDetails = com::paypal::soap::api::DoExpressCheckoutPaymentRequestDetailsType->new();
-  $requestDetails->setToken($args->{token});
-  $requestDetails->setPayerID($args->{PayerID});
-  $requestDetails->setPaymentAction($com::paypal::soap::api::PaymentActionCodeType::Sale);
-  
-  my $paymentDetails = com::paypal::soap::api::PaymentDetailsType->new();
-  my $orderTotal = com::paypal::soap::api::BasicAmountType->new();
+  my $resp;
+  my $responseDetails;
+  eval {
+    my $request = com::paypal::soap::api::DoExpressCheckoutPaymentRequestType->new();
+    my $requestDetails = com::paypal::soap::api::DoExpressCheckoutPaymentRequestDetailsType->new();
+    $requestDetails->setToken($args->{token});
+    $requestDetails->setPayerID($args->{PayerID});
+    $requestDetails->setPaymentAction($com::paypal::soap::api::PaymentActionCodeType::Sale);
+    
+    my $paymentDetails = com::paypal::soap::api::PaymentDetailsType->new();
+    my $orderTotal = com::paypal::soap::api::BasicAmountType->new();
 
-  $orderTotal->set_value($args->{OrderTotal});
-  $orderTotal->setCurrencyID($com::paypal::soap::api::CurrencyCodeType::USD);
+    $orderTotal->set_value($args->{OrderTotal});
+    $orderTotal->setCurrencyID($com::paypal::soap::api::CurrencyCodeType::USD);
 
-  $paymentDetails->setOrderTotal($orderTotal);
+    $paymentDetails->setOrderTotal($orderTotal);
 
-  $requestDetails->setPaymentDetails($paymentDetails);
+    $requestDetails->setPaymentDetails($paymentDetails);
 
-  $request->setDoExpressCheckoutPaymentRequestDetails($requestDetails);
+    $request->setDoExpressCheckoutPaymentRequestDetails($requestDetails);
 
-  my $resp = $s->paypal->call('DoExpressCheckoutPayment', $request);
+    $resp = $s->paypal->call('DoExpressCheckoutPayment', $request);
 
-  my $responseDetails = $resp->getDoExpressCheckoutPaymentResponseDetails();
+    $responseDetails = $resp->getDoExpressCheckoutPaymentResponseDetails();
+  };
+
+  if ($@) {
+    if (Inline::Java::caught('java.lang.Exception')) {
+      if (ref $@) {
+        $s->error("DoExpressCheckoutPayment failed: [" . $@->getMessage() . '] [' . $@ . ']');
+      } else {
+        $s->error("DoExpressCheckoutPayment failed: [" . $@ . ']');
+      }
+      return undef;
+    } else {
+      $s->error($@);
+      return undef;
+    }
+  }
 
   my $ret= {};
 
@@ -409,9 +505,10 @@ sub DoExpressCheckoutPayment {
   $ret->{ack} = $ack->toString;
 
   $ret->{Token} = $responseDetails->getToken;
-  
+
   my $paymentInfo = $responseDetails->getPaymentInfo();
-  
+
+ 
   if ($ret->{ack} eq 'Success') {
 	  my $feeAmount = $paymentInfo->getFeeAmount();
 	  
@@ -471,6 +568,11 @@ sub DoExpressCheckoutPayment {
   return $ret;
 }
 
+=head2 GetExpressCheckoutDetails()
+
+GetExpressCheckoutDetails to get customer details.
+
+=cut
 sub GetExpressCheckoutDetails {
   my $s = shift;
   my $args = shift;
@@ -482,10 +584,13 @@ sub GetExpressCheckoutDetails {
     }
   }
 
-  unless ($args->{token}) {
-    $s->error("token must be defined in GetExpressCheckoutDetails.");
-    return undef;
-  }
+  my $reqs = [
+    qw/
+      token
+    /
+  ];
+
+  return undef unless ($s->_checkRequires($reqs, $args));
 
   package main;
   Inline::Java::study_classes(
@@ -497,9 +602,6 @@ sub GetExpressCheckoutDetails {
         com.paypal.soap.api.PersonNameType
         com.paypal.soap.api.PayerInfoType
         com.paypal.soap.api.AddressType
-        com.paypal.soap.api.ErrorType
-        com.paypal.soap.api.AckCodeType
-        org.apache.axis.types.Token
         com.paypal.soap.api.CountryCodeType
         com.paypal.soap.api.PayPalUserStatusCodeType
       )
@@ -507,15 +609,31 @@ sub GetExpressCheckoutDetails {
   );
   package Business::PayPal::SDK;
 
-  my $request = com::paypal::soap::api::GetExpressCheckoutDetailsRequestType->new();
-  $request->setToken($args->{token});
+  my $resp;
+  my $respDetails;
+  my $payerInfo;
+  eval {
+    my $request = com::paypal::soap::api::GetExpressCheckoutDetailsRequestType->new();
+    $request->setToken($args->{token});
 
-  my $resp = $s->paypal->call("GetExpressCheckoutDetails", $request);
+    $resp = $s->paypal->call("GetExpressCheckoutDetails", $request);
+    $respDetails = $resp->getGetExpressCheckoutDetailsResponseDetails();
+    $payerInfo = $respDetails->getPayerInfo();
+  };
 
-  my $respDetails = $resp->getGetExpressCheckoutDetailsResponseDetails();
-  
-  my $payerInfo = $respDetails->getPayerInfo();
-  
+  if ($@) {
+    if (Inline::Java::caught('java.lang.Exception')) {
+      if (ref $@) {
+        $s->error("GetExpressCheckoutDetails failed: [" . $@->getMessage() . '] [' . $@ . ']');
+      } else {
+        $s->error("GetExpressCheckoutDetails failed: [" . $@ . ']');
+      }
+      return undef;
+    } else {
+      $s->error($@);
+      return undef;
+    }
+  }
  
   my $ret = {};
   my $ack = $resp->getAck();
@@ -546,7 +664,7 @@ sub GetExpressCheckoutDetails {
 	  $ret->{PayerInfo}->{PayerAddress}->{AddressID} = $payerAddress->getAddressID();
 	  $ret->{PayerInfo}->{PayerAddress}->{CityName} = $payerAddress->getCityName();
 	  my $CountryCodeType = $payerAddress->getCountry;
-	  $ret->{PayerInfo}->{PayerAddress}->{Country} = $CountryCodeType->toString();
+	  $ret->{PayerInfo}->{PayerAddress}->{Country} = $CountryCodeType->toString() if $CountryCodeType;
 	  $ret->{PayerInfo}->{PayerAddress}->{CountryName} = $payerAddress->getCountryName();
 	  $ret->{PayerInfo}->{PayerAddress}->{Phone} = $payerAddress->getPhone();
 	  $ret->{PayerInfo}->{PayerAddress}->{Name} = $payerAddress->getName();
@@ -560,6 +678,11 @@ sub GetExpressCheckoutDetails {
   return  $ret;
 }
 
+=head2 SetExpressCheckout()
+
+SetExpressCheckout to get token
+
+=cut
 sub SetExpressCheckout {
   my $s = shift;
   my $args = shift;
@@ -590,9 +713,6 @@ sub SetExpressCheckout {
         com.paypal.soap.api.SetExpressCheckoutRequestDetailsType
         com.paypal.soap.api.BasicAmountType
         com.paypal.soap.api.CountryCodeType
-        com.paypal.soap.api.CurrencyCodeType
-        com.paypal.soap.api.ErrorType
-        com.paypal.sdk.exceptions.PayPalException
       )
     ]
   );
@@ -631,17 +751,112 @@ sub SetExpressCheckout {
     return undef;
   }
 
-  if ($resp->getToken()) {
+  my $ack = $resp->getAck();
+  $ret->{ack} = $ack->toString;
+
+  if ($ret->{ack} eq 'Success') {
     $ret->{token} = $resp->getToken();
-    return $ret;
+    $ret->{ErrorCodes} = $s->_getErrorHash($resp->getErrors);
   } else {
-    my $errors = $resp->getErrors;
-    foreach my $err (@$errors) {
-      $s->error($err->getLongMessage());
+    $ret->{ErrorCodes} = $s->_getErrorHash($resp->getErrors);
+  }
+  return $ret;
+}
+
+=head2 RefundTransaction()
+
+RefundTransaction to do refund. RefundType is defaulted to 'Full'
+
+=cut
+sub RefundTransaction {
+  my $s = shift;
+  my $args = shift;
+
+  unless ($s->paypal) {
+    unless ($s->init_java) {
+      $s->error("could not init_java.");
+      return undef;
+    }
+  }
+
+  $args->{RefundType} ||= 'Full';
+
+  my $reqs = [
+    qw/
+      TransactionID
+      RefundType
+    /
+  ];
+
+  if ($args->{RefundType} ne 'Full') {
+    push @$reqs, 'Amount';
+  }
+
+  return undef unless $s->_checkRequires($reqs, $args);
+
+  unless ($args->{RefundType} =~ /^(Full|Partial|Other)$/) {
+  }
+
+  package main;
+  Inline::Java::study_classes(
+    [
+      qw(
+        com.paypal.soap.api.RefundTransactionRequestType
+        com.paypal.soap.api.RefundTransactionResponseType
+        com.paypal.soap.api.RefundPurposeTypeCodeType
+        com.paypal.soap.api.BasicAmountType
+      )
+    ]
+  );
+  package Business::PayPal::SDK;
+
+  my $resp;
+  eval {
+  
+    my $request = com::paypal::soap::api::RefundTransactionRequestType->new();
+
+    $request->setTransactionID($args->{TransactionID});
+    
+    my $RefundType = com::paypal::soap::api::RefundPurposeTypeCodeType->fromString($args->{RefundType});
+    $request->setRefundType($RefundType);
+    if ($args->{Amount}) {
+      my $Amount = com::paypal::soap::api::BasicAmountType->new($args->{Amount});
+      $Amount->setCurrencyID($com::paypal::soap::api::CurrencyCodeType::USD);
+      $request->setAmount($Amount);
+    }
+    $request->setMemo($args->{Memo}) if $args->{Memo};
+    $resp = $s->paypal->call("RefundTransaction", $request);
+  };
+  my $ret = {};
+
+  if ($@) {
+    my $var = $@;
+    if (ref $@) {
+      $s->error("RefundTransaction failed: [" . $var->getMessage() . '] [' . $var . ']');
+    } else {
+      $s->error("RefundTransaction failed: [$var]");
     }
     return undef;
   }
+  
+  my $ack = $resp->getAck();
+  $ret->{ack} = $ack->toString;
+
+  if ($ret->{ack} eq "Success") {
+    my $FeeRefundAmount = $resp->getFeeRefundAmount();
+    my $GrossRefundAmount = $resp->getGrossRefundAmount();
+    my $NetRefundAmount = $resp->getNetRefundAmount();
+    $ret->{FeeRefundAmount}->{value} = $FeeRefundAmount->get_value() if $FeeRefundAmount;
+    $ret->{GrossRefundAmount}->{value} = $GrossRefundAmount->get_value() if $GrossRefundAmount;
+    $ret->{NetRefundAmount}->{value} = $NetRefundAmount->get_value() if $NetRefundAmount;
+    $ret->{ErrorCodes} = $s->_getErrorHash($resp->getErrors);
+  } else {
+    $ret->{ErrorCodes} = $s->_getErrorHash($resp->getErrors);
+  }
+  return $ret;
 }
+
+
 
 sub _getAddress {
   my $s = shift;
@@ -650,7 +865,6 @@ sub _getAddress {
   my @requires = qw/
     Street1
     CityName
-    StateOrProvince
     PostalCode
     Country
   /;
@@ -694,7 +908,6 @@ sub _getCountryCode {
     $s->error("You must pass a valid code to _getCountryCode. [$cc]");
     return 
   }
-
   package main;
   require Inline::Java;
   Inline::Java::study_classes(
@@ -712,7 +925,13 @@ sub _getCountryCode {
   };
 
   if ($@) {
-    $s->error("getCountryCode failed: [" . $@->getMessage() . '] [' . $@->toString() . ']');
+    if ((ref $@) eq 'main::java::lang::IllegalArgumentException') {
+      $s->error("getCountryCode failed: [$cc] is not a valid country code.");
+    } elsif (ref $@) {
+      $s->error("getCountryCode failed: [" . $@->getMessage() . '] [' . $@ . ']');
+    } else {
+      $s->error("getCountryCode failed: [$@]");
+    }
     return undef;
   } else {
     return $code;
@@ -725,7 +944,7 @@ sub _checkRequires {
   my $args = shift;
 
   unless (ref $reqs) {
-    my $s->error('You must pass an arrayref to check_requires.');
+    $s->error('You must pass an arrayref to check_requires.');
     return undef;
   }
 
@@ -739,6 +958,11 @@ sub _checkRequires {
   return 1;
 }
 
+=head2 TransactionSearch()
+
+This is not really completed yet.
+
+=cut
 sub TransactionSearch {
   my $s = shift;
   my $args = shift;
@@ -756,10 +980,7 @@ sub TransactionSearch {
       qw(
         com.paypal.soap.api.TransactionSearchRequestType
         com.paypal.soap.api.TransactionSearchResponseType
-        com.paypal.soap.api.AckCodeType
         com.paypal.sdk.exceptions.TransactionException
-        com.paypal.sdk.exceptions.PayPalException
-        com.paypal.soap.api.ErrorType
         java.util.Calendar
         java.lang.String
       )
@@ -767,18 +988,37 @@ sub TransactionSearch {
   );
   package Business::PayPal::SDK;
   
-  my $request = com::paypal::soap::api::TransactionSearchRequestType->new();
-  my $jcal = Inline::Java::cast('java.util.Calendar', java::util::Calendar->getInstance());
-  $jcal->set(@{$args->{date}});
-  $request->setStartDate($jcal);
+  my $resp;
+  eval {
+    my $request = com::paypal::soap::api::TransactionSearchRequestType->new();
+    my $jcal = Inline::Java::cast('java.util.Calendar', java::util::Calendar->getInstance());
+    $jcal->set(@{$args->{date}});
+    $request->setStartDate($jcal);
 
-  my $resp = $s->paypal->call("TransactionSearch", $request);
+    my $resp = $s->paypal->call("TransactionSearch", $request);
+  };
 
   my $ackcode = $resp->getAck();
 
-  print $ackcode->toString;
+  if ($@) {
+    my $var = $@;
+    if (ref $@) {
+      $s->error("RefundTransaction failed: [" . $var->getMessage() . '] [' . $var . ']');
+    } else {
+      $s->error("RefundTransaction failed: [$var]");
+    }
+    return undef;
+  }
+
   my $ret = {};
+  $ret->{ack} = $ackcode->toString;
+  if ($args->{ack} eq 'Success') {
+    1;
+  } else {
+    1;
+  }
   $ret->{ErrorCodes} = $s->_getErrorHash($resp->getErrors);
+  return $ret;
 }
 
 sub _getDateString {
@@ -834,53 +1074,17 @@ sub get_classpath {
   return join ":", @jars;
 }
 
+sub dumper {
+  my $s = shift;
+  my $thing = shift;
+
+  require Data::Dumper;
+  return Data::Dumper::Dumper($thing);
+}
+
 1;
 
 __END__
-=head1 NAME
-
-Business::PayPal::SDK - An interface to paypals SDK's.
-
-=head1 SYNOPSIS
-
-  use Business::PayPal::SDK;
-  my $pp = new Business::PayPal::SDK(
-    {
-      paypal_apiid => "sdk-seller_api1.sdk.com",
-      paypal_apipw => "12345678",
-      paypal_cert => "paypal_java_sdk/samples/Cert/sdk-seller.p12",
-      paypal_certpw => "password",
-      paypal_env => "sandbox",
-      java_sdk_dir => "/path/to/paypals/java/sdk",
-    }
-  );
-
-  my $res = $pp->SetExpressCheckout(
-    {
-      OrderTotal => '10.00',
-      ReturnURL => 'http:://mydomain.com/myreturn',
-      CancelURL => 'http:://mydomain.com/mycancel',
-    }
-  );
-
-  print $res->{token};
-
-=head1 DESCRIPTION
-
-Business::PayPal::SDK is a perl interface to the SDK provided by paypal (http://www.paypal.com/sdk). You can use this module to implement paypal pro and paypal express transactions in perl. On the back end this modules uses Inline::Java to interface directly with the paypals java sdk. Consequently you will need to get a J2SDK and Inline::Java installed.  This was done for 2 reasons. 1) Speed of development, didnt have to deal with all the SOAP stuff. 2) Easier maintanance regarding future changes. That is to say, I only have to make sure I keep this compatiable with paypals SDK, not thier underlying protocol changes.
-
-All methods take a single hashref as an argument.
-All methods return a hashref, or undef if there is a failure. Check $obj->error for description of failure.
-
-=head1 Public Methods
-
-$resp = DoExpressCheckoutPayment({ arg => value, args => value })
-
-$resp = GetExpressCheckoutDetails({ args => value, args => value })
-
-$resp = SetExpressCheckout({ args => value, args => value })
-
-$resp = DoDirectPayment({ args => value, args => value })
 
 =head1 NOTES
 
@@ -900,5 +1104,3 @@ Also thanks to Rob Brown for assistance.
 
 Business::PayPal::SDK is Copyright(c) 2005 Jacob Boswell. All rights reserved
 You may distribute under the terms of either the GNU General Public License or the Artistic License, as specified in the Perl README file.
-
-=cut
