@@ -1,5 +1,8 @@
 Revision history for Perl extension Business::PayPal::SDK.
 
+0.14 Fri Dec 9
+  - fixed not returning RefundTransactionID in RefundTransaction
+
 0.13 Wed Dec 7
   - Added RefundTransaction
   - Standardized all responses. Previously some functions returned undef when they should have returned a hash of paypals response.

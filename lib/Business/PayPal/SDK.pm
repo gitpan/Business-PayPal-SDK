@@ -1,6 +1,6 @@
 package Business::PayPal::SDK;
 
-#$Id: SDK.pm,v 1.6 2005/12/08 01:01:05 jacob Exp $
+#$Id: SDK.pm,v 1.7 2005/12/08 18:18:31 jacob Exp $
 #
 =head1 NAME
 
@@ -63,7 +63,7 @@ use Data::Dumper;
 __PACKAGE__->mk_accessors (@REQUIRED, @OTHER);
 
 our $ERROR = '';
-our $VERSION = '0.13';
+our $VERSION = '0.14';
 our $PPCONINFO = undef;
 
 =head1 Public Methods
@@ -795,6 +795,8 @@ sub RefundTransaction {
   return undef unless $s->_checkRequires($reqs, $args);
 
   unless ($args->{RefundType} =~ /^(Full|Partial|Other)$/) {
+    $s->error("[$args->{RefundType}] is not a valid RefundType");
+    return undef;
   }
 
   package main;
@@ -846,6 +848,7 @@ sub RefundTransaction {
     my $FeeRefundAmount = $resp->getFeeRefundAmount();
     my $GrossRefundAmount = $resp->getGrossRefundAmount();
     my $NetRefundAmount = $resp->getNetRefundAmount();
+    $ret->{RefundTransactionID} = $resp->getRefundTransactionID();
     $ret->{FeeRefundAmount}->{value} = $FeeRefundAmount->get_value() if $FeeRefundAmount;
     $ret->{GrossRefundAmount}->{value} = $GrossRefundAmount->get_value() if $GrossRefundAmount;
     $ret->{NetRefundAmount}->{value} = $NetRefundAmount->get_value() if $NetRefundAmount;
